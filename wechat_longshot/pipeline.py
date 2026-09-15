@@ -88,7 +88,7 @@ def capture_long_image(opts: Options) -> Frame:
 
     calibrate_scroll(scroller)
 
-    sp = navigate_to_start(scroller, opts.start, opts.now)
+    sp = navigate_to_start(scroller, opts.start, opts.now, debug_dir=opts.debug_dir)
     stitcher = Stitcher(region)
     stitcher.add(sp.frame)
     _dump(opts.debug_dir, "page_000.png", region.crop(sp.frame))

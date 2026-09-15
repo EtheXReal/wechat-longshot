@@ -6,6 +6,9 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+
+import cv2
 
 from .ocr import recognize_text
 from .scroller import Scroller
@@ -50,8 +53,18 @@ def navigate_to_start(
     now: datetime,
     max_pages: int = 2000,
     top_retries: int = 3,
+    debug_dir: Path | None = None,
 ) -> StartPoint:
-    """Scroll up until a time separator <= ``start`` is visible (or the top is reached).
+    """Scroll until the *last* time separator ``<= start`` is on screen.
+
+    The view may currently be newer or older than ``start`` (the user, or a previous
+    run, may have left it anywhere), so this walks in whichever direction is needed:
+
+    * all visible labels are newer than ``start``  -> page up (older)
+    * all visible labels are older/equal           -> page down (newer) until a newer
+      label shows up or the bottom is hit, then the boundary is the newest label
+      ``<= start`` seen in the last two (overlapping) frames
+    * both kinds visible                           -> done
 
     With ``start=None`` the current view is used as-is.
     """
@@ -61,27 +74,60 @@ def navigate_to_start(
     if start is None:
         return StartPoint(frame, None, None, False)
 
+    def labels_of(fr: Frame, page: int) -> list[TimeLabel]:
+        labs = find_time_labels(fr, region, now)
+        log.info("nav page %d: %s", page, [lb.box.text for lb in labs])
+        if debug_dir is not None:
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(debug_dir / f"nav_{page:03d}.png"), region.crop(fr))
+        return labs
+
+    def boundary(labs: list[TimeLabel]) -> TimeLabel | None:
+        older = [lb for lb in labs if lb.when <= start]
+        return max(older, key=lambda lb: lb.when) if older else None
+
+    seen_newer = seen_older = False
+    direction = -1  # -1 = towards older (page up), +1 = towards newer (page down)
+    fraction = 0.7
     stuck = 0
     for page in range(max_pages):
-        labels = find_time_labels(frame, region, now)
-        older = [lb for lb in labels if lb.when <= start]
-        if older:
-            best = max(older, key=lambda lb: lb.when)
-            log.info("start separator %r (%s) found after %d pages", best.box.text, best.when, page)
-            return StartPoint(frame, max(0, best.box.rect.y - 8), best, False)
+        labels = labels_of(frame, page)
+        has_newer = any(lb.when > start for lb in labels)
+        has_older = any(lb.when <= start for lb in labels)
+
+        if has_older and (has_newer or seen_newer):
+            # Bracketed: the newest label <= start on this screen is the boundary.
+            return _at(frame, boundary(labels), page)
+        if has_older:
+            seen_older, direction, fraction = True, +1, 0.7
+        elif has_newer:
+            # Coming up from the older side we overshot: back-track in small steps.
+            direction, fraction = -1, (0.35 if seen_older else 0.7)
+            seen_newer = True
+        # No labels at all: keep going the way we were going.
 
         prev = frame
-        frame = scroller.page_up(0.7)
-        if _same(prev, frame, region):
-            stuck += 1
-            if stuck > top_retries:
-                log.info("reached top of history after %d pages", page)
-                return StartPoint(frame, None, None, True)
-            time.sleep(0.8)  # give WeChat time to lazy-load older history
-            frame = scroller.settle()
-        else:
+        frame = scroller.page_down(fraction) if direction > 0 else scroller.page_up(fraction)
+        if not _same(prev, frame, region):
             stuck = 0
+            continue
+        stuck += 1
+        if direction > 0:
+            log.info("bottom of chat reached while looking for %s", start)
+            return _at(frame, boundary(labels), page)
+        if stuck > top_retries:
+            log.info("reached top of history after %d pages", page)
+            return StartPoint(frame, None, None, True)
+        time.sleep(0.8)  # give WeChat time to lazy-load older history
+        frame = scroller.settle()
     return StartPoint(frame, None, None, True)
+
+
+def _at(frame: Frame, label: TimeLabel | None, page: int) -> StartPoint:
+    if label is None:
+        return StartPoint(frame, None, None, False)
+    log.info("start separator %r (%s) found after %d pages", label.box.text, label.when, page)
+    return StartPoint(frame, max(0, label.box.rect.y - 8), label, False)
 
 
 def _same(a: Frame, b: Frame, region: Rect) -> bool:

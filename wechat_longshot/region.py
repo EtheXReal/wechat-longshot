@@ -12,13 +12,14 @@ message list, so we discover it empirically:
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
 from .errors import RegionNotFound
 from .types import CaptureFn, Frame, Rect, ScrollFn
 
 _DIFF_THRESHOLD = 24  # per-pixel abs difference (max over channels) to count as "changed"
-_BG_TOLERANCE = 8  # max channel distance from the panel background colour
+_BG_TOLERANCE = 6  # max channel distance from the panel background colour (flat fill)
 _BG_ROW_FRACTION = 0.985  # fraction of a row/column that must be background to keep growing
 _MIN_CHANGED_FRACTION = 0.02
 _SCROLLBAR_FRACTION = 0.013  # WeChat's overlay scrollbar hugs the right edge (~6 pt)
@@ -27,6 +28,17 @@ _SCROLLBAR_FRACTION = 0.013  # WeChat's overlay scrollbar hugs the right edge (~
 def _changed_mask(a: Frame, b: Frame) -> np.ndarray:
     d = np.abs(a.astype(np.int16) - b.astype(np.int16)).max(axis=2)
     return d > _DIFF_THRESHOLD
+
+
+def _drop_small_components(mask: np.ndarray, min_w: int, min_h: int) -> np.ndarray:
+    """Remove changed blobs that are tiny in *both* dimensions (the blinking text caret,
+    an unread badge, a hover highlight edge) so they cannot stretch the bounding box."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    keep = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        w, h = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+        keep[i] = w >= min_w or h >= min_h
+    return keep[labels]
 
 
 def _bbox(mask: np.ndarray) -> Rect | None:
@@ -82,6 +94,22 @@ def _shrink_seed(frame: Frame, box: Rect, bg: np.ndarray) -> Rect:
     return box
 
 
+def trim_static_edges(base: Frame, moved: Frame, region: Rect, bg: np.ndarray) -> Rect:
+    """Cut rows at the top/bottom of ``region`` that did not move with the list and are
+    not plain background (e.g. an input box or toolbar that slipped into the box)."""
+    a = region.crop(base)
+    b = region.crop(moved)
+    changed_rows = _changed_mask(a, b).any(axis=1)
+    bg_rows = np.array([_is_bg_line(row, bg) for row in a])
+    static_nonbg = ~changed_rows & ~bg_rows
+    y1, y2 = 0, region.h
+    while y2 > y1 and static_nonbg[y2 - 1]:
+        y2 -= 1
+    while y1 < y2 and static_nonbg[y1]:
+        y1 += 1
+    return Rect(region.x, region.y + y1, region.w, y2 - y1)
+
+
 def detect_message_region(
     capture: CaptureFn, scroll: ScrollFn, frame_hint: Frame | None = None, probe_px: int = 160
 ) -> Rect:
@@ -110,6 +138,7 @@ def detect_message_region(
     # when new messages arrive) and the top 5 % (title bar).
     mask[:, : int(w * 0.30)] = False
     mask[: int(h * 0.05), :] = False
+    mask = _drop_small_components(mask, min_w=int(w * 0.02), min_h=int(h * 0.04))
     box = _bbox(mask)
     if box is None:
         raise RegionNotFound("No changed pixels inside the expected message-panel area.")
@@ -119,6 +148,7 @@ def detect_message_region(
     region = grow_to_background(base, box, bg)
     margin = int(region.w * _SCROLLBAR_FRACTION)
     region = Rect(region.x, region.y, region.w - margin, region.h)
+    region = trim_static_edges(base, moved, region, bg)
     if region.w < w * 0.3 or region.h < h * 0.3:
         raise RegionNotFound(
             f"Detected region {region} looks too small; pass --region to override."
