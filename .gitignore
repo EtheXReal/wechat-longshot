@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# uv / venv (uv.lock IS committed: this is an application, not a library)
+.venv/
+.uv-cache/
+
+# outputs
+out/
+out/*.png
+*.pdf
+wechat-longshot-*.png
+
+# macOS
+.DS_Store

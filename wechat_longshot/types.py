@@ -11,9 +11,9 @@ Coordinate conventions
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable
 
 import numpy as np
 
@@ -80,4 +80,6 @@ class TimeLabel:
 
 
 CaptureFn = Callable[[], Frame]
-ScrollFn = Callable[[int], None]  # scroll by N image pixels; negative = content moves down (view older)
+ScrollFn = Callable[
+    [int], Frame
+]  # scroll by N image pixels (positive = view newer); returns the settled frame
