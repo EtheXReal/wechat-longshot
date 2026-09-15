@@ -27,7 +27,17 @@ Scroll-capture a WeChat (macOS 4.x) conversation into one tall screenshot and a 
 
   授予后需要**完全退出并重新打开终端**才会生效。
 
-### 安装
+### 图形界面（推荐）
+
+双击仓库里的 **`启动微信长截图.command`**（首次运行会自动安装 uv 和依赖），或者在终端里执行：
+
+```bash
+uv run wechat-longshot-gui
+```
+
+在窗口里选"从当前画面开始"或填一个起始时间，点"开始截图"，完成后 PDF 会自动打开。
+
+### 安装（命令行）
 
 ```bash
 # 安装成全局命令
@@ -123,7 +133,17 @@ print, or hand to someone else.
 
   You must fully quit and reopen the terminal after granting them.
 
-### Install
+### GUI (recommended)
+
+Double-click **`启动微信长截图.command`** in the repo (first run installs uv and the dependencies), or run:
+
+```bash
+uv run wechat-longshot-gui
+```
+
+Pick "from current view" or type a start time, press Start, and the PDF opens when done.
+
+### Install (CLI)
 
 ```bash
 # install as a global command

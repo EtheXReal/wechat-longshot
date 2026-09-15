@@ -33,6 +33,7 @@ dependencies = [
 
 [project.scripts]
 wechat-longshot = "wechat_longshot.cli:app"
+wechat-longshot-gui = "wechat_longshot.gui:main"
 
 [project.urls]
 Homepage = "https://github.com/EtheXReal/wechat-longshot"
